@@ -127,7 +127,8 @@ class _Tail:
 
 
 def tmux_push(pane: str, text: str) -> None:
-    cmd = ["tmux", "display-message"]
+    # -l: literal — observed command text must never be format-expanded
+    cmd = ["tmux", "display-message", "-l"]
     if pane.startswith("%"):
         cmd += ["-t", pane]
     subprocess.run(cmd + [text], check=False, capture_output=True)
