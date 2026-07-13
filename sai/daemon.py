@@ -6,6 +6,7 @@ thin file-tailing wrapper around it.
 """
 from __future__ import annotations
 
+import codecs
 import json
 import subprocess
 import time
@@ -84,18 +85,21 @@ class DaemonCore:
 
         if tracker is not None and tracker.blind:
             # Invariant 3: an event inside a blind span never becomes a candidate.
-            # Salience is not consulted; the suppression is still audited (§9).
+            # Salience is not consulted — not even as R2 history later (§6:
+            # blind spans are excluded from salience entirely) — but the
+            # suppression is still audited (§9).
             self._log({
                 "t": now, "type": "verdict", "pane": event.pane, "fp": fp,
                 "rule": None, "severity": None, "verdict": "drop", "reason": "blind",
             })
-        else:
-            candidate = evaluate(event, self._history.get(event.pane, []))
-            if candidate is not None:
-                verdict = self._policy.decide(candidate)
-                self._log(verdict_to_json(verdict, now, event.pane))
-                if isinstance(verdict, Push):
-                    self._push(event.pane, verdict.text)
+            return
+
+        candidate = evaluate(event, self._history.get(event.pane, []))
+        if candidate is not None:
+            verdict = self._policy.decide(candidate)
+            self._log(verdict_to_json(verdict, now, event.pane))
+            if isinstance(verdict, Push):
+                self._push(event.pane, verdict.text)
 
         history = self._history.setdefault(event.pane, [])
         history.append(event)
@@ -103,11 +107,20 @@ class DaemonCore:
 
 
 class _Tail:
-    """Byte-offset tailer; resets on truncation/rotation."""
+    """Byte-offset tailer; resets on truncation/rotation.
 
-    def __init__(self, path: Path):
+    start_at_end skips content already present when the tailer is created —
+    a restarted daemon must not replay history (duplicate audit records,
+    re-pushes of stale events)."""
+
+    def __init__(self, path: Path, *, start_at_end: bool = False):
         self.path = path
         self.offset = 0
+        if start_at_end:
+            try:
+                self.offset = path.stat().st_size
+            except FileNotFoundError:
+                pass
 
     def read(self) -> bytes:
         try:
@@ -127,11 +140,13 @@ class _Tail:
 
 
 def tmux_push(pane: str, text: str) -> None:
-    # -l: literal — observed command text must never be format-expanded
-    cmd = ["tmux", "display-message", "-l"]
+    # ## renders a literal # — observed command text must never be
+    # format-expanded (display-message -l would be cleaner but needs tmux 3.4;
+    # the floor is 3.2).
+    cmd = ["tmux", "display-message"]
     if pane.startswith("%"):
         cmd += ["-t", pane]
-    subprocess.run(cmd + [text], check=False, capture_output=True)
+    subprocess.run(cmd + [text.replace("#", "##")], check=False, capture_output=True)
 
 
 class Daemon:
@@ -151,9 +166,15 @@ class Daemon:
         self._pings = state_dir / "pings.jsonl"
         self._poll_s = poll_s
         self.core = DaemonCore(config, clock=clock, push=push, log=self._append_log)
-        self._tsv_tail = _Tail(state_dir / "events.tsv")
+        # Pre-existing content is history, not news: start at EOF. Files that
+        # appear after startup are read from the beginning.
+        self._tsv_tail = _Tail(state_dir / "events.tsv", start_at_end=True)
         self._tsv_buf = b""
-        self._pane_tails: dict[str, _Tail] = {}
+        self._pane_tails: dict[str, _Tail] = {
+            path.name[len("out-"):-len(".log")]: _Tail(path, start_at_end=True)
+            for path in state_dir.glob("out-*.log")
+        }
+        self._decoders: dict[str, codecs.IncrementalDecoder] = {}
 
     def _append_log(self, record: dict) -> None:
         with self._pings.open("a", encoding="utf-8") as f:
@@ -167,7 +188,14 @@ class Daemon:
             tail = self._pane_tails.setdefault(pane, _Tail(path))
             data = tail.read()
             if data:
-                self.core.on_pane_output(pane, data.decode("utf-8", "replace"))
+                # incremental decode: a UTF-8 char split across polls must not
+                # become U+FFFD (it would destabilize fingerprints)
+                decoder = self._decoders.setdefault(
+                    pane, codecs.getincrementaldecoder("utf-8")(errors="replace")
+                )
+                text = decoder.decode(data)
+                if text:
+                    self.core.on_pane_output(pane, text)
         data = self._tsv_tail.read()
         if data:
             self._tsv_buf += data

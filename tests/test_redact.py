@@ -34,6 +34,12 @@ class TestKeyValuePatterns:
     def test_lowercase_names_covered(self):
         assert SECRET not in redact(f"password={SECRET}")
 
+    def test_unbalanced_quote_cannot_bypass(self):
+        assert SECRET not in redact(f'PASSWORD="{SECRET}')
+
+    def test_embedded_quote_cannot_leave_a_partial_value(self):
+        assert SECRET not in redact(f'TOKEN=xy"{SECRET}')
+
 
 class TestAuthorizationHeader:
     def test_bearer(self):

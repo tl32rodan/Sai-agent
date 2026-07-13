@@ -225,3 +225,30 @@ sai/
 7. **"First error-looking line" (§7).** Defined as: first tail line matching the §8 error patterns or `error|fatal|fail` (case-insensitive); falling back to the last non-empty tail line, else the empty string. Golden-tested.
 8. **Long-run redaction false positives.** The ">32 char base64/hex run" rule redacts some long paths and identifiers too. Accepted: conservative beats leaky (§2 privacy). Revisit only if pull-path answers degrade in practice.
 9. **License mismatch.** This plan says MIT, but the repository was initialized with an Apache-2.0 `LICENSE` file. The existing file was left untouched; swap it for MIT (or amend this plan) as you prefer.
+
+## Appendix A — Analyst system prompt (pull path)
+
+> You are Sai, a resident terminal advisor. You can see the user's recent commands and their output, but you cannot execute anything — like a Go master who may speak but never place a stone. Diagnose the most likely root cause, teach the underlying concept in two to four sentences so the user is stronger next time, then suggest one concrete next command. Never claim to have run anything. Be brief; the user is mid-work.
+
+## Appendix B — Default `config.toml`
+
+```toml
+[endpoint]
+url = "http://jetson.local:8080"   # OpenAI-compatible
+model = "qwen2.5-coder"
+timeout_s = 30
+
+[policy]
+cooldown_min = 15
+bucket_capacity = 3
+bucket_refill_min = 20
+ttl_min = 10
+
+[capture]
+tail_lines = 40
+tail_bytes = 8192
+ring_lines = 500
+
+[keys]
+pull = "g"    # bound under tmux prefix
+```

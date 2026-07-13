@@ -22,12 +22,14 @@ _sai_precmd() {
   [[ -n "$_sai_cmd" ]] || return 0
   local end="$EPOCHREALTIME"
   local -F dur=$(( end - _sai_start ))
+  # a tab or newline in the cwd would corrupt the TSV record
+  local cwd="${_sai_cwd//[$'\t\n']/ }"
   # base64 wraps at 76 cols; strip all newlines so the record stays one line.
   local b64
   b64="$(print -rn -- "$_sai_cmd" | base64)"
   b64="${b64//$'\n'/}"
   LC_ALL=C printf '%s\tcmd\t%d\t%.3f\t%s\t%s\t%s\n' \
-    "$end" "$ret" "$dur" "$_sai_cwd" "${TMUX_PANE:-none}" "$b64" \
+    "$end" "$ret" "$dur" "$cwd" "${TMUX_PANE:-none}" "$b64" \
     >> "$SAI_STATE_DIR/events.tsv" 2>/dev/null
   _sai_cmd=""
   return 0

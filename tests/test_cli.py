@@ -88,6 +88,27 @@ class TestPullCommand:
         assert "Traceback" not in out
 
 
+class TestInstallBlock:
+    def test_creates_and_rewrites_idempotently(self, tmp_path):
+        from sai.cli import _install_block
+        rc = tmp_path / "rc"
+        assert _install_block(rc, "source /repo/sai.zsh") is True
+        assert _install_block(rc, "source /repo/sai.zsh") is False  # unchanged
+        assert _install_block(rc, "source /elsewhere/sai.zsh") is True
+        content = rc.read_text()
+        assert "/elsewhere/" in content and "/repo/" not in content
+
+    def test_orphaned_begin_marker_does_not_swallow_user_content(self, tmp_path):
+        from sai.cli import _MARK_BEGIN, _install_block
+        rc = tmp_path / "rc"
+        rc.write_text(f"{_MARK_BEGIN}\nalias ll='ls -l'\n")  # corrupted: no end marker
+        _install_block(rc, "source /repo/sai.zsh")
+        _install_block(rc, "source /repo/sai.zsh")  # the dangerous second pass
+        content = rc.read_text()
+        assert "alias ll='ls -l'" in content
+        assert content.count("source /repo/sai.zsh") == 1
+
+
 class TestVersionFlag:
     def test_version(self, capsys):
         with pytest.raises(SystemExit) as exc:

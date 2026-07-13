@@ -55,7 +55,11 @@ def _install_block(path: Path, block: str) -> bool:
     """Idempotently (re)write the marker-delimited block in `path`."""
     content = path.read_text() if path.exists() else ""
     wrapped = f"{_MARK_BEGIN}\n{block}\n{_MARK_END}\n"
-    pattern = re.compile(re.escape(_MARK_BEGIN) + r".*?" + re.escape(_MARK_END) + r"\n?", re.DOTALL)
+    # Tempered dot: a block never spans another begin marker, so an orphaned
+    # begin marker earlier in the file can't swallow user content up to our
+    # real block's end marker.
+    begin, end = re.escape(_MARK_BEGIN), re.escape(_MARK_END)
+    pattern = re.compile(rf"{begin}(?:(?!{begin}).)*?{end}\n?", re.DOTALL)
     if pattern.search(content):
         updated = pattern.sub(wrapped, content)
     else:
@@ -96,6 +100,10 @@ def cmd_init(_args: argparse.Namespace) -> int:
     # 2. State + default config.
     sdir = state_dir()
     sdir.mkdir(parents=True, exist_ok=True)
+    default_sdir = Path.home() / ".local" / "state" / "sai"
+    if sdir != default_sdir:
+        print(f"WARNING: state dir is {sdir}, but tmux/sai.conf pipes new panes to\n"
+              f"         {default_sdir} — edit the paths in {tmux_conf} to match.")
     cpath = config_path()
     if not cpath.exists():
         cpath.parent.mkdir(parents=True, exist_ok=True)
@@ -111,14 +119,18 @@ def cmd_init(_args: argparse.Namespace) -> int:
         print(f"installed tmux include → {tmux_rc}")
 
     # 4. `sai` on PATH (repo-local wrapper; no pip needed — runtime is stdlib-only).
+    #    A Python script with the path embedded via repr avoids shell quoting
+    #    entirely, whatever characters the repo path contains.
     if not shutil.which("sai"):
         bin_dir = Path.home() / ".local" / "bin"
         bin_dir.mkdir(parents=True, exist_ok=True)
         wrapper = bin_dir / "sai"
         wrapper.write_text(
-            "#!/bin/sh\n# managed by sai init\n"
-            f'exec python3 -c "import sys; sys.path.insert(0, \'{_repo_root}\'); '
-            'from sai.cli import main; sys.exit(main())" "$@"\n'
+            "#!/usr/bin/env python3\n# managed by sai init\n"
+            "import sys\n"
+            f"sys.path.insert(0, {str(_repo_root)!r})\n"
+            "from sai.cli import main\n"
+            "sys.exit(main())\n"
         )
         wrapper.chmod(0o755)
         print(f"installed wrapper → {wrapper}  (ensure ~/.local/bin is on PATH)")

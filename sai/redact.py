@@ -13,8 +13,10 @@ REDACTED = "[REDACTED]"
 # API_KEY= and AWS_*= — matched as a name *containing* those words, so
 # GITHUB_TOKEN, MY_API_KEY and AWS_SECRET_ACCESS_KEY are all covered.
 _SECRET_NAME = r"(?:[A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASS|PASSWD)[A-Za-z0-9_]*|AWS_[A-Za-z_]+)"
+# The bare-value branch is \S+ so unbalanced or embedded quotes can never
+# leave a partial value behind (over-redaction beats a leak).
 _KV_RE = re.compile(
-    rf"(?i)\b({_SECRET_NAME})(\s*[=:]\s*)(\"[^\"\n]*\"|'[^'\n]*'|[^\s'\"]+)"
+    rf"(?i)\b({_SECRET_NAME})(\s*[=:]\s*)(\"[^\"\n]*\"|'[^'\n]*'|\S+)"
 )
 
 _AUTH_RE = re.compile(r"(?i)\b(Authorization\s*:\s*)([^\n]+)")

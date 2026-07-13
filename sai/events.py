@@ -12,10 +12,10 @@ from dataclasses import dataclass, replace
 import re
 from typing import Iterable
 
-# CSI / OSC / short escape sequences (SGR colors, cursor movement, titles,
-# keypad modes like ESC= / ESC>, charset designations like ESC(B, ...).
+# CSI / OSC / short escape sequences (SGR colors incl. colon subparameters,
+# cursor movement, titles, keypad modes like ESC= / ESC>, charsets like ESC(B).
 _ANSI_RE = re.compile(
-    r"\x1b(?:\[[0-9;?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)?|[ -/]*[0-~])"
+    r"\x1b(?:\[[0-9;:?<=>]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)?|[ -/]*[0-~])"
 )
 _CTRL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 
@@ -130,7 +130,8 @@ class RingBuffer:
                 break
             kept.append(line)
         if not kept and window:  # a single oversized line: truncate, don't lose it
-            kept = [window[-1][:max_bytes]]
+            raw = window[-1].encode("utf-8", "surrogateescape")[:max_bytes]
+            kept = [raw.decode("utf-8", "ignore")]
         return tuple(reversed(kept))
 
 
@@ -148,13 +149,14 @@ class PaneTracker:
         self.ring = RingBuffer(ring_lines)
         self._partial = ""
         self._esc_carry = ""
+        self._skip_lf = False
 
     def feed(self, t: float, data: str) -> list[str]:
         data = self._esc_carry + data
         self._esc_carry = ""
         # Hold back a CSI sequence cut by the chunk boundary so a split
         # alternate-screen toggle is still seen whole on the next feed.
-        if m := re.search(r"\x1b(?:\[[0-9;?]*)?$", data):
+        if m := re.search(r"\x1b(?:\[[0-9;:?<=>]*)?$", data):
             self._esc_carry = data[m.start():]
             data = data[: m.start()]
         transitions: list[str] = []
@@ -168,12 +170,20 @@ class PaneTracker:
                 transitions.append("enter" if entering else "exit")
                 if entering:
                     self._partial = ""  # a line cut by a blind entry is unusable
+                    self._skip_lf = False
         self._ingest(t, data[pos:])
         return transitions
 
     def _ingest(self, t: float, text: str) -> None:
         if not text or self.blind:
             return
+        if self._skip_lf:  # \r\n split across chunks: the \r already broke the line
+            self._skip_lf = False
+            if text.startswith("\n"):
+                text = text[1:]
+                if not text:
+                    return
+        self._skip_lf = text.endswith("\r")
         self._partial += text.replace("\r\n", "\n").replace("\r", "\n")
         *complete, self._partial = self._partial.split("\n")
         for line in complete:

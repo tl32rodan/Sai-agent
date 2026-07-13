@@ -68,6 +68,10 @@ class TestStripAnsi:
     def test_other_control_chars_dropped_tab_kept(self):
         assert strip_ansi("a\x00b\x07c\td") == "abc\td"
 
+    def test_colon_subparameter_sgr(self):
+        assert strip_ansi("\x1b[38:5:196mred\x1b[0m") == "red"
+        assert strip_ansi("\x1b[4:3mundercurl\x1b[4:0m") == "undercurl"
+
 
 class TestRingBuffer:
     def test_capacity_evicts_oldest(self):
@@ -103,6 +107,13 @@ class TestRingBuffer:
         snap = ring.snapshot(T0, T0 + 1, max_bytes=100)
         assert len(snap) == 1 and snap[0] == "x" * 100
 
+    def test_oversized_line_cap_is_bytes_not_chars(self):
+        ring = RingBuffer()
+        ring.append(T0, "佐" * 9000)  # 3 bytes per char in UTF-8
+        (line,) = ring.snapshot(T0, T0 + 1, max_bytes=100)
+        assert len(line.encode()) <= 100
+        assert line == "佐" * 33  # truncation never splits a character
+
     def test_ansi_stripped_in_snapshot(self):
         ring = RingBuffer()
         ring.append(T0, "\x1b[31mError\x1b[0m: boom")
@@ -127,6 +138,12 @@ class TestPaneTracker:
         tr.feed(T0, "c\n")
         # lone \r is a line break too (progress bars)
         assert tr.ring.snapshot(T0, T0 + 1) == ("a", "b", "c")
+
+    def test_crlf_split_across_chunks_no_phantom_empty_line(self):
+        tr = PaneTracker()
+        tr.feed(T0, "a\r")
+        tr.feed(T0 + 0.1, "\nb\n")
+        assert tr.ring.snapshot(T0, T0 + 1) == ("a", "b")
 
     def test_blind_enter_exit_transitions(self):
         tr = PaneTracker()

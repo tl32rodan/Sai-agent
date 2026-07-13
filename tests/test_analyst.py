@@ -95,6 +95,14 @@ class _Handler(BaseHTTPRequestHandler):
         body = json.dumps(_Handler.response).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
+        if "/truncate-me" in self.path:  # ask() appends /v1/chat/completions
+            # advertise more than we send, then close: IncompleteRead client-side
+            self.send_header("Content-Length", str(len(body) + 50))
+            self.end_headers()
+            self.wfile.write(body)
+            self.wfile.flush()
+            self.connection.close()
+            return
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -128,3 +136,16 @@ class TestAsk:
     def test_unreachable_endpoint_is_one_line_error(self):
         with pytest.raises(AnalystError, match="unreachable"):
             ask("http://127.0.0.1:9", {"model": "m", "messages": []}, timeout_s=2)
+
+    def test_proxy_env_is_ignored(self, endpoint, monkeypatch):
+        # context goes only to the configured endpoint — never through a
+        # generic proxy from the environment
+        monkeypatch.delenv("no_proxy", raising=False)
+        monkeypatch.setenv("http_proxy", "http://127.0.0.1:1")
+        monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:1")
+        _Handler.response = {"choices": [{"message": {"content": "ok"}}]}
+        assert ask(endpoint, build_payload("ctx", model="m"), timeout_s=5) == "ok"
+
+    def test_connection_dropped_mid_body_is_one_line_error(self, endpoint):
+        with pytest.raises(AnalystError, match="connection failed"):
+            ask(endpoint + "/truncate-me", {"model": "m", "messages": []}, timeout_s=5)

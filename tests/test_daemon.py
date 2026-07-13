@@ -78,6 +78,20 @@ def test_tail_snapshot_attached_to_cmd_event():
     assert "old noise" not in cmd_record["tail"]
 
 
+def test_blind_span_failures_never_feed_struggle_history():
+    # §6: blind spans are excluded from salience entirely — including as the
+    # history that R2 compares later commands against.
+    clock = FakeClock()
+    core, pushes, log = make_core(clock)
+    core.on_pane_output("%1", "\x1b[?1049h")
+    core.on_tsv_line(make_tsv(t=clock.t, cmd="make lens", exit=2, pane="%1"))
+    clock.advance(30)
+    core.on_pane_output("%1", "\x1b[?1049l")
+    core.on_tsv_line(make_tsv(t=clock.t, cmd="make lens", exit=2, pane="%1"))
+    visible = [r for r in log if r["type"] == "verdict" and r.get("reason") != "blind"]
+    assert [(r["verdict"], r["rule"]) for r in visible] == [("push", "r1")]
+
+
 def test_events_for_unknown_pane_still_processed():
     clock = FakeClock()
     core, pushes, log = make_core(clock)
@@ -128,6 +142,53 @@ class TestDaemonIOSmoke:
             f.write(line[10:] + "\n")
         daemon.step()
         assert len(pushes) == 1
+
+    def test_restart_does_not_replay_history(self, tmp_path):
+        clock = FakeClock()
+        first_pushes: list[tuple[str, str]] = []
+        daemon = Daemon(tmp_path, Config(), clock=clock,
+                        push=lambda pane, text: first_pushes.append((pane, text)))
+        (tmp_path / "out-%1.log").write_bytes(b"make: *** [lens] Error 2\n")
+        (tmp_path / "events.tsv").write_text(
+            make_tsv(t=clock.t, cmd="make lens", exit=2, pane="%1") + "\n")
+        daemon.step()
+        assert len(first_pushes) == 1
+        log_size = (tmp_path / "pings.jsonl").stat().st_size
+
+        # restart 30 s later: history must not be replayed — no duplicate
+        # audit records, no re-push inside the cooldown window
+        clock.advance(30)
+        second_pushes: list[tuple[str, str]] = []
+        restarted = Daemon(tmp_path, Config(), clock=clock,
+                           push=lambda pane, text: second_pushes.append((pane, text)))
+        restarted.step()
+        assert second_pushes == []
+        assert (tmp_path / "pings.jsonl").stat().st_size == log_size
+
+        # …but events appended after the restart are picked up
+        with (tmp_path / "events.tsv").open("a") as f:
+            f.write(make_tsv(t=clock.t, cmd="cargo build", exit=1, pane="%1") + "\n")
+        restarted.step()
+        assert len(second_pushes) == 1
+
+    def test_utf8_char_split_across_polls(self, tmp_path):
+        clock = FakeClock()
+        daemon = Daemon(tmp_path, Config(), clock=clock, push=lambda p, t: None)
+        raw = "error: 佐為 not found\n".encode()
+        (tmp_path / "out-%1.log").write_bytes(raw[:9])  # cuts 佐 mid-sequence
+        daemon.step()
+        with (tmp_path / "out-%1.log").open("ab") as f:
+            f.write(raw[9:])
+        daemon.step()
+        (tmp_path / "events.tsv").write_text(
+            make_tsv(t=clock.t, cmd="make", exit=2, pane="%1") + "\n")
+        daemon.step()
+        records = [
+            json.loads(line)
+            for line in (tmp_path / "pings.jsonl").read_text().splitlines()
+        ]
+        (cmd_record,) = [r for r in records if r["type"] == "cmd"]
+        assert cmd_record["tail"] == ["error: 佐為 not found"]
 
     def test_truncated_file_resets_offset(self, tmp_path):
         clock = FakeClock()

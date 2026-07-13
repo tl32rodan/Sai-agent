@@ -2,6 +2,7 @@
 the machine; everything passes through redact() first (invariant 5)."""
 from __future__ import annotations
 
+import http.client
 import json
 import urllib.error
 import urllib.request
@@ -64,6 +65,12 @@ def build_payload(context: str, *, model: str) -> dict:
     }
 
 
+# The endpoint the user configured is the only place this data may go: an
+# opener with no proxies keeps generic http_proxy/https_proxy environment
+# variables from silently rerouting the context through another host.
+_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
 def ask(url: str, payload: dict, timeout_s: float = 30.0) -> str:
     request = urllib.request.Request(
         url.rstrip("/") + "/v1/chat/completions",
@@ -72,7 +79,7 @@ def ask(url: str, payload: dict, timeout_s: float = 30.0) -> str:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=timeout_s) as response:
+        with _opener.open(request, timeout=timeout_s) as response:
             body = json.load(response)
         return body["choices"][0]["message"]["content"].strip()
     except urllib.error.HTTPError as e:
@@ -83,3 +90,6 @@ def ask(url: str, payload: dict, timeout_s: float = 30.0) -> str:
         raise AnalystError(f"endpoint timed out after {timeout_s:.0f}s") from e
     except (KeyError, IndexError, TypeError, json.JSONDecodeError) as e:
         raise AnalystError("endpoint sent an unexpected response shape") from e
+    except (OSError, http.client.HTTPException) as e:
+        # dropped connection mid-body, truncated reads, TLS errors, ...
+        raise AnalystError(f"connection failed ({e.__class__.__name__})") from e
