@@ -1,0 +1,26 @@
+[project]
+name = "sai-advisor"
+version = "0.1.0"
+description = "Sai (佐為) — ambient, observe-only terminal advisor for zsh + tmux"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "Brian" }]
+dependencies = []  # runtime is stdlib-only, deliberately (PLAN.md §13)
+
+[project.optional-dependencies]
+dev = ["pytest", "hypothesis"]
+
+[project.scripts]
+sai = "sai.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["sai"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
