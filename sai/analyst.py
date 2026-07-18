@@ -56,13 +56,15 @@ def build_payload(context: str, *, model: str) -> dict:
         f"{context}\n\n"
         "What is most likely going wrong, why, and what should I try next?"
     )
-    return {
-        "model": model,
+    payload: dict = {
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": redact(user)},
         ],
     }
+    if model:  # empty model: omit the field — the endpoint's loaded model is used
+        payload["model"] = model
+    return payload
 
 
 # The endpoint the user configured is the only place this data may go: an

@@ -213,7 +213,7 @@ sai/
 
 ## 15. Open questions (implementing agent: ask, don't assume)
 
-1. LLM endpoint URL and model name for the pull path (llama.cpp on Jetson? port?).
+1. LLM endpoint URL and model name for the pull path (llama.cpp on Jetson? port?). *(Model: resolved 2026-07-18 — left empty by owner decision; the request omits the field and the endpoint's loaded model is used. URL: still open, set in `config.toml` at deploy time.)*
 2. Confirm zsh is the only shell on the target machine for M0 (tcsh is a non-goal).
 3. Preferred keybinding if `prefix + g` collides with an existing tmux binding.
 4. Should `pings.jsonl` drops be pruned/rotated, or is append-forever fine for 14 days? (Default: append-forever.)
@@ -224,7 +224,7 @@ sai/
 6. **R2 on a successful command.** Should a *successful* command completion fire the struggle-loop rule because two earlier commands in the window failed? Chosen default: no — the current event must itself be a failure for R2 (a struggle that just ended in success needs no ping). Table-tested in `tests/test_salience.py`.
 7. **"First error-looking line" (§7).** Defined as: first tail line matching the §8 error patterns or `error|fatal|fail` (case-insensitive); falling back to the last non-empty tail line, else the empty string. Golden-tested.
 8. **Long-run redaction false positives.** The ">32 char base64/hex run" rule redacts some long paths and identifiers too. Accepted: conservative beats leaky (§2 privacy). Revisit only if pull-path answers degrade in practice.
-9. **License mismatch.** This plan says MIT, but the repository was initialized with an Apache-2.0 `LICENSE` file. The existing file was left untouched; swap it for MIT (or amend this plan) as you prefer.
+9. **License mismatch.** *(Resolved 2026-07-18: owner chose MIT; the Apache-2.0 `LICENSE` file was replaced.)*
 
 ## Appendix A — Analyst system prompt (pull path)
 
@@ -235,7 +235,7 @@ sai/
 ```toml
 [endpoint]
 url = "http://jetson.local:8080"   # OpenAI-compatible
-model = "qwen2.5-coder"
+model = ""                         # empty: use whatever model the endpoint has loaded
 timeout_s = 30
 
 [policy]

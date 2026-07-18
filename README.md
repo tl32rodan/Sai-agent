@@ -91,5 +91,4 @@ in `tests/test_invariants.py`.
 
 ## License
 
-See [LICENSE](LICENSE). (PLAN.md §preamble says MIT while the repository was
-created with an Apache-2.0 LICENSE file — owner to reconcile, PLAN.md §15.1 Q9.)
+MIT — see [LICENSE](LICENSE).

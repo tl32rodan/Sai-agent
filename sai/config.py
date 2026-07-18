@@ -12,7 +12,7 @@ from pathlib import Path
 DEFAULT_CONFIG_TOML = """\
 [endpoint]
 url = "http://jetson.local:8080"   # OpenAI-compatible
-model = "qwen2.5-coder"
+model = ""                         # empty: use whatever model the endpoint has loaded
 timeout_s = 30
 
 [policy]
@@ -34,7 +34,7 @@ pull = "g"    # bound under tmux prefix
 @dataclass(frozen=True)
 class Config:
     url: str = "http://jetson.local:8080"
-    model: str = "qwen2.5-coder"
+    model: str = ""  # empty: the endpoint's loaded model is used
     timeout_s: float = 30.0
     cooldown_min: float = 15.0
     bucket_capacity: int = 3

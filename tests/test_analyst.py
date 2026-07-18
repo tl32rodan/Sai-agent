@@ -85,6 +85,10 @@ class TestBuildPayload:
         payload = build_payload("$ make lens   [exit 2]", model="m")
         assert "$ make lens" in payload["messages"][1]["content"]
 
+    def test_empty_model_omits_the_field(self):
+        # default config leaves model empty: the endpoint's loaded model is used
+        assert "model" not in build_payload("ctx", model="")
+
 
 class _Handler(BaseHTTPRequestHandler):
     response: dict = {}
