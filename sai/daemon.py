@@ -178,8 +178,11 @@ class Daemon:
         clock: Callable[[], float] = time.time,
         push: Callable[[str, str], None] = tmux_push,
         poll_s: float = POLL_S,
+        runtime_dir: Path | None = None,
     ):
         state_dir.mkdir(parents=True, exist_ok=True)
+        run_dir = runtime_dir or state_dir  # volatile files: host-local in prod
+        run_dir.mkdir(parents=True, exist_ok=True)
         self._state_dir = state_dir
         self._pings = state_dir / "pings.jsonl"
         self._poll_s = poll_s
@@ -193,7 +196,7 @@ class Daemon:
             for path in state_dir.glob("out-*.log")
         }
         self._decoders: dict[str, codecs.IncrementalDecoder] = {}
-        self._status_path = state_dir / "status"
+        self._status_path = run_dir / "status"
         self._last_status: str | None = None
 
     def _append_log(self, record: dict) -> None:

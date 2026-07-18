@@ -5,6 +5,7 @@ parse_config() is pure; the path helpers and load_config() are the IO edge.
 from __future__ import annotations
 
 import os
+import socket
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -81,11 +82,37 @@ def config_path() -> Path:
     return base / "sai" / "config.toml"
 
 
-def state_dir() -> Path:
+def short_hostname() -> str:
+    return socket.gethostname().split(".")[0]
+
+
+def state_root() -> Path:
+    """Parent of all per-host state dirs. On an NFS home this is the shared
+    collection point: every host writes its own subdir, any host can read all
+    of them (PLAN.md §16.5)."""
     if override := os.environ.get("SAI_STATE_DIR"):
-        return Path(override)
+        return Path(override).parent
     base = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state"))
     return base / "sai"
+
+
+def state_dir() -> Path:
+    """This host's durable state (events.tsv, pings.jsonl). Host-scoped so
+    NFS-shared homes never see two hosts writing one file — every file has
+    exactly one writing host."""
+    if override := os.environ.get("SAI_STATE_DIR"):
+        return Path(override)
+    return state_root() / short_hostname()
+
+
+def runtime_dir() -> Path:
+    """Host-local volatile state (status, daemon.pid). Never on NFS: the
+    pidfile needs local O_EXCL semantics and clears itself on reboot."""
+    if override := os.environ.get("SAI_RUNTIME_DIR"):
+        return Path(override)
+    if xdg := os.environ.get("XDG_RUNTIME_DIR"):
+        return Path(xdg) / "sai"
+    return Path(f"/tmp/sai-{os.getuid()}")
 
 
 def load_config(path: Path | None = None) -> Config:

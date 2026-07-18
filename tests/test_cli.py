@@ -29,6 +29,7 @@ class TestParseTmuxVersion:
 @pytest.fixture
 def state(monkeypatch, tmp_path):
     monkeypatch.setenv("SAI_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("SAI_RUNTIME_DIR", str(tmp_path / "run"))
     monkeypatch.setenv("SAI_CONFIG", str(tmp_path / "config.toml"))
     for var in ("http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY"):
         monkeypatch.delenv(var, raising=False)
@@ -121,9 +122,10 @@ class TestStatusCommand:
         assert main(["status"]) == 0
         assert "no status yet" in capsys.readouterr().out
 
-    def test_prints_status_file(self, state, capsys):
-        state.mkdir(parents=True)
-        (state / "status").write_text("⏺ make ok · just now\n▷ all quiet · C-b g anytime\n")
+    def test_prints_status_file_from_runtime_dir(self, state, tmp_path, capsys):
+        run = tmp_path / "run"
+        run.mkdir(parents=True)
+        (run / "status").write_text("⏺ make ok · just now\n▷ all quiet · C-b g anytime\n")
         assert main(["status"]) == 0
         out = capsys.readouterr().out
         assert out.startswith("⏺ make ok") and "▷ all quiet" in out
@@ -148,6 +150,72 @@ class TestInstallBlock:
         content = rc.read_text()
         assert "alias ll='ls -l'" in content
         assert content.count("source /repo/sai.zsh") == 1
+
+
+class TestPidfile:
+    def test_claim_then_conflict_then_stale_recovery(self, tmp_path):
+        import subprocess
+
+        from sai.cli import _claim_pidfile, _live_pid
+        pidfile = tmp_path / "daemon.pid"
+        assert _claim_pidfile(pidfile) is True  # our own (live) pid is written
+        assert _claim_pidfile(pidfile) is False  # second daemon must back off
+        # a crashed daemon leaves a dead pid behind: the claim self-heals
+        dead = subprocess.Popen(["true"])
+        dead.wait()
+        pidfile.write_text(str(dead.pid))
+        assert _live_pid(pidfile) is None
+        assert _claim_pidfile(pidfile) is True
+
+    def test_garbage_pidfile_is_treated_as_stale(self, tmp_path):
+        from sai.cli import _claim_pidfile
+        pidfile = tmp_path / "daemon.pid"
+        pidfile.write_text("not-a-pid")
+        assert _claim_pidfile(pidfile) is True
+
+
+class TestEnsureDaemon:
+    def test_noop_when_daemon_alive(self, state, tmp_path, monkeypatch):
+        import os
+        import subprocess as sp
+        (tmp_path / "run").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "run" / "daemon.pid").write_text(str(os.getpid()))
+        spawned = []
+        monkeypatch.setattr(sp, "Popen", lambda *a, **k: spawned.append(a))
+        assert main(["ensure-daemon"]) == 0
+        assert spawned == []
+
+    def test_spawns_when_absent(self, state, monkeypatch):
+        import subprocess as sp
+
+        class FakeProc:
+            pid = 12345
+
+        spawned = []
+
+        def fake_popen(argv, **kwargs):
+            spawned.append((argv, kwargs))
+            return FakeProc()
+
+        monkeypatch.setattr(sp, "Popen", fake_popen)
+        assert main(["ensure-daemon"]) == 0
+        (call,) = spawned
+        assert "from sai.cli import main" in call[0][2]
+        assert call[1]["start_new_session"] is True
+
+
+class TestAllHostsStats:
+    def test_aggregates_across_host_dirs(self, state, tmp_path, capsys):
+        # state root is the parent of SAI_STATE_DIR: build sibling host dirs
+        root = (tmp_path / "state").parent
+        for host, t in (("hosta", T0), ("hostb", T0 + 10)):
+            d = root / host
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "pings.jsonl").write_text(json.dumps({"t": t, "type": "pull"}) + "\n")
+        assert main(["stats", "--all-hosts"]) == 0
+        out = capsys.readouterr().out
+        assert "across 2 host(s)" in out
+        assert "pulls:  2" in out
 
 
 class TestVersionFlag:

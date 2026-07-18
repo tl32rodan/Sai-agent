@@ -6,7 +6,8 @@
 zmodload zsh/datetime 2>/dev/null || return 0
 autoload -Uz add-zsh-hook
 
-: ${SAI_STATE_DIR:="${XDG_STATE_HOME:-$HOME/.local/state}/sai"}
+# Host-scoped: on an NFS home, every host writes only its own subdir (§16.5).
+: ${SAI_STATE_DIR:="${XDG_STATE_HOME:-$HOME/.local/state}/sai/${HOST%%.*}"}
 [[ -d "$SAI_STATE_DIR" ]] || mkdir -p "$SAI_STATE_DIR" 2>/dev/null
 
 typeset -g _sai_cmd="" _sai_start=0 _sai_cwd=""
@@ -37,3 +38,13 @@ _sai_precmd() {
 
 add-zsh-hook preexec _sai_preexec
 add-zsh-hook precmd _sai_precmd
+
+# Lazy per-host daemon start (§16.5): ssh-ing into any host of the fleet
+# brings its daemon up. The pidfile lives on host-local tmpfs, so the cheap
+# existence check below covers the common case; `sai ensure-daemon` does the
+# real liveness check. Opt out with SAI_NO_AUTOSTART=1.
+if [[ -z "$SAI_NO_AUTOSTART" ]] && command -v sai >/dev/null 2>&1; then
+  _sai_rt="${SAI_RUNTIME_DIR:-${XDG_RUNTIME_DIR:+$XDG_RUNTIME_DIR/sai}}"
+  : ${_sai_rt:="/tmp/sai-$UID"}
+  [[ -e "$_sai_rt/daemon.pid" ]] || sai ensure-daemon >/dev/null 2>&1 &!
+fi
