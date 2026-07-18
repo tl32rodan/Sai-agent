@@ -100,6 +100,22 @@ Privacy is a load-bearing wall, not a feature:
   alternate screen; Sai excludes those spans from its buffers and its rules entirely.
   The sensor's limit and the politeness boundary coincide by design.
 
+## Multi-host / NFS homes
+
+Sai's unit of residency is the host, not the `$HOME`. On a workstation fleet with an
+NFS-shared home this works out of the box (PLAN.md §16.5):
+
+* each host writes only its own `~/.local/state/sai/<hostname>/` — no cross-host file
+  sharing, no NFS locking, no pane-id collisions;
+* the zsh snippet lazily starts a per-host daemon on your first shell there
+  (`sai ensure-daemon`; opt out with `SAI_NO_AUTOSTART=1`); volatile files (status,
+  pidfile) live in host-local `/tmp/sai-$UID` (0700, ownership-checked; independent
+  of `XDG_RUNTIME_DIR` by design — unsetting that var changes nothing);
+* `sai stats --all-hosts` aggregates every host's audit log over NFS — free fleet-wide
+  measurement, no collector service;
+* to keep the LLM on a single machine, set `backend = "http"` and point `url` at the
+  one box running llama.cpp — the shared config applies to every host at once.
+
 ## Development
 
 ```sh

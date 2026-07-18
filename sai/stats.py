@@ -71,8 +71,10 @@ def _coverage_by_day(records: Sequence[dict]) -> list[tuple[str, float, float, f
     return out
 
 
-def render_stats(stats: dict, *, days: int | None = None) -> str:
+def render_stats(stats: dict, *, days: int | None = None, hosts: int | None = None) -> str:
     scope = f"last {days} day(s)" if days is not None else "all time"
+    if hosts is not None:
+        scope += f" · across {hosts} host(s)"
     lines = [f"sai stats — {scope}"]
 
     by_rule = " · ".join(f"{k} {v}" for k, v in sorted(stats["pushes_by_rule"].items()))

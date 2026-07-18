@@ -3,7 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from sai.config import (
-    DEFAULT_CONFIG_TOML, Config, config_path, load_config, parse_config, state_dir,
+    DEFAULT_CONFIG_TOML, Config, config_path, load_config, parse_config,
+    runtime_dir, short_hostname, state_dir, state_root,
 )
 
 
@@ -32,10 +33,30 @@ class TestPaths:
         monkeypatch.setenv("SAI_STATE_DIR", str(tmp_path / "s"))
         assert state_dir() == tmp_path / "s"
 
-    def test_state_dir_xdg(self, monkeypatch, tmp_path):
+    def test_state_dir_xdg_is_host_scoped(self, monkeypatch, tmp_path):
         monkeypatch.delenv("SAI_STATE_DIR", raising=False)
         monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
-        assert state_dir() == tmp_path / "sai"
+        assert state_dir() == tmp_path / "sai" / short_hostname()
+        assert state_root() == tmp_path / "sai"
+
+    def test_state_root_is_parent_of_env_override(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("SAI_STATE_DIR", str(tmp_path / "root" / "hostA"))
+        assert state_root() == tmp_path / "root"
+
+    def test_short_hostname_has_no_dots(self):
+        assert "." not in short_hostname() and short_hostname()
+
+    def test_runtime_dir_env_override(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("SAI_RUNTIME_DIR", str(tmp_path / "rt"))
+        assert runtime_dir() == tmp_path / "rt"
+
+    def test_runtime_dir_ignores_xdg_and_is_per_user_tmp(self, monkeypatch):
+        # deliberately independent of XDG_RUNTIME_DIR: the user's shells and
+        # the tmux server may disagree about it (some setups unset it)
+        monkeypatch.delenv("SAI_RUNTIME_DIR", raising=False)
+        monkeypatch.setenv("XDG_RUNTIME_DIR", "/run/user/99999")
+        import os
+        assert runtime_dir() == Path(f"/tmp/sai-{os.getuid()}")
 
     def test_config_path_env_override(self, monkeypatch, tmp_path):
         monkeypatch.setenv("SAI_CONFIG", str(tmp_path / "c.toml"))
@@ -52,5 +73,5 @@ class TestPaths:
     def test_default_paths_are_under_home(self, monkeypatch):
         for var in ("SAI_STATE_DIR", "SAI_CONFIG", "XDG_STATE_HOME", "XDG_CONFIG_HOME"):
             monkeypatch.delenv(var, raising=False)
-        assert state_dir() == Path.home() / ".local" / "state" / "sai"
+        assert state_dir() == Path.home() / ".local" / "state" / "sai" / short_hostname()
         assert config_path() == Path.home() / ".config" / "sai" / "config.toml"
