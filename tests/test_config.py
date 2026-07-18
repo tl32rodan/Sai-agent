@@ -50,14 +50,11 @@ class TestPaths:
         monkeypatch.setenv("SAI_RUNTIME_DIR", str(tmp_path / "rt"))
         assert runtime_dir() == tmp_path / "rt"
 
-    def test_runtime_dir_xdg(self, monkeypatch, tmp_path):
+    def test_runtime_dir_ignores_xdg_and_is_per_user_tmp(self, monkeypatch):
+        # deliberately independent of XDG_RUNTIME_DIR: the user's shells and
+        # the tmux server may disagree about it (some setups unset it)
         monkeypatch.delenv("SAI_RUNTIME_DIR", raising=False)
-        monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
-        assert runtime_dir() == tmp_path / "sai"
-
-    def test_runtime_dir_tmp_fallback_is_per_user(self, monkeypatch):
-        monkeypatch.delenv("SAI_RUNTIME_DIR", raising=False)
-        monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+        monkeypatch.setenv("XDG_RUNTIME_DIR", "/run/user/99999")
         import os
         assert runtime_dir() == Path(f"/tmp/sai-{os.getuid()}")
 

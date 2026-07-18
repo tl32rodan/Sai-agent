@@ -65,12 +65,14 @@ def _read_pings_all_hosts() -> tuple[list[dict], int]:
 
 
 def _ensure_runtime_dir() -> Path:
+    """Create the host-local runtime dir, refusing a squatted one: /tmp is
+    shared, so a directory we don't own must never receive our status."""
     rd = runtime_dir()
     rd.mkdir(parents=True, exist_ok=True)
-    try:
-        rd.chmod(0o700)  # pane context is private, even in /tmp fallback
-    except OSError:
-        pass
+    if rd.stat().st_uid != os.getuid():
+        raise RuntimeError(
+            f"{rd} is owned by someone else — remove it or set SAI_RUNTIME_DIR")
+    rd.chmod(0o700)
     return rd
 
 
@@ -219,7 +221,11 @@ def cmd_init(_args: argparse.Namespace) -> int:
 
 
 def cmd_daemon(_args: argparse.Namespace) -> int:
-    rd = _ensure_runtime_dir()
+    try:
+        rd = _ensure_runtime_dir()
+    except RuntimeError as e:
+        print(f"sai daemon: {e}")
+        return 1
     pidfile = rd / "daemon.pid"
     if not _claim_pidfile(pidfile):
         print(f"sai daemon already running on {short_hostname()} (pid {_live_pid(pidfile)})")
@@ -239,7 +245,11 @@ def cmd_daemon(_args: argparse.Namespace) -> int:
 def cmd_ensure_daemon(_args: argparse.Namespace) -> int:
     """Idempotent per-host start — called from the zsh snippet so ssh-ing
     into any host of an NFS-homed fleet brings its daemon up lazily (§16.5)."""
-    rd = _ensure_runtime_dir()
+    try:
+        rd = _ensure_runtime_dir()
+    except RuntimeError as e:
+        print(f"sai ensure-daemon: {e}")
+        return 1
     if _live_pid(rd / "daemon.pid") is not None:
         return 0
     sdir = state_dir()

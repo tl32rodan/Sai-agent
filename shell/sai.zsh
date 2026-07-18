@@ -44,7 +44,6 @@ add-zsh-hook precmd _sai_precmd
 # existence check below covers the common case; `sai ensure-daemon` does the
 # real liveness check. Opt out with SAI_NO_AUTOSTART=1.
 if [[ -z "$SAI_NO_AUTOSTART" ]] && command -v sai >/dev/null 2>&1; then
-  _sai_rt="${SAI_RUNTIME_DIR:-${XDG_RUNTIME_DIR:+$XDG_RUNTIME_DIR/sai}}"
-  : ${_sai_rt:="/tmp/sai-$UID"}
+  _sai_rt="${SAI_RUNTIME_DIR:-/tmp/sai-$UID}"
   [[ -e "$_sai_rt/daemon.pid" ]] || sai ensure-daemon >/dev/null 2>&1 &!
 fi

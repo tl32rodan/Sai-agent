@@ -152,6 +152,24 @@ class TestInstallBlock:
         assert content.count("source /repo/sai.zsh") == 1
 
 
+class TestRuntimeDirGuard:
+    def test_squatted_dir_is_refused(self, state, tmp_path, monkeypatch):
+        import os
+
+        from sai import cli
+        (tmp_path / "run").mkdir(parents=True, exist_ok=True)
+        # simulate a directory owned by someone else
+        real_uid = os.getuid()
+        monkeypatch.setattr(cli.os, "getuid", lambda: real_uid + 1)
+        assert main(["ensure-daemon"]) == 1
+
+    def test_owned_dir_gets_0700(self, state, tmp_path):
+        from sai.cli import _ensure_runtime_dir
+        rd = _ensure_runtime_dir()
+        assert rd == tmp_path / "run"
+        assert (rd.stat().st_mode & 0o777) == 0o700
+
+
 class TestPidfile:
     def test_claim_then_conflict_then_stale_recovery(self, tmp_path):
         import subprocess

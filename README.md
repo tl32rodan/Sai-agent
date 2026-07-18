@@ -109,7 +109,8 @@ NFS-shared home this works out of the box (PLAN.md §16.5):
   sharing, no NFS locking, no pane-id collisions;
 * the zsh snippet lazily starts a per-host daemon on your first shell there
   (`sai ensure-daemon`; opt out with `SAI_NO_AUTOSTART=1`); volatile files (status,
-  pidfile) live on host-local tmpfs;
+  pidfile) live in host-local `/tmp/sai-$UID` (0700, ownership-checked; independent
+  of `XDG_RUNTIME_DIR` by design — unsetting that var changes nothing);
 * `sai stats --all-hosts` aggregates every host's audit log over NFS — free fleet-wide
   measurement, no collector service;
 * to keep the LLM on a single machine, set `backend = "http"` and point `url` at the

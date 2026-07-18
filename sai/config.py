@@ -107,11 +107,12 @@ def state_dir() -> Path:
 
 def runtime_dir() -> Path:
     """Host-local volatile state (status, daemon.pid). Never on NFS: the
-    pidfile needs local O_EXCL semantics and clears itself on reboot."""
+    pidfile needs local O_EXCL semantics. Deliberately NOT derived from
+    XDG_RUNTIME_DIR — that env var differs between a user's shells and the
+    tmux server (some setups unset it), and a split there would strand the
+    status file. /tmp is host-local by convention on NFS-homed fleets."""
     if override := os.environ.get("SAI_RUNTIME_DIR"):
         return Path(override)
-    if xdg := os.environ.get("XDG_RUNTIME_DIR"):
-        return Path(xdg) / "sai"
     return Path(f"/tmp/sai-{os.getuid()}")
 
 
