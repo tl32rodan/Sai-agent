@@ -7,7 +7,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import pytest
 
 from sai.analyst import (
-    SYSTEM_PROMPT, AnalystError, ask, build_payload, gather_context,
+    SYSTEM_PROMPT, AnalystError, ask, ask_command, build_payload, build_prompt,
+    gather_context,
 )
 from tests.conftest import T0
 
@@ -88,6 +89,43 @@ class TestBuildPayload:
     def test_empty_model_omits_the_field(self):
         # default config leaves model empty: the endpoint's loaded model is used
         assert "model" not in build_payload("ctx", model="")
+
+
+class TestBuildPrompt:
+    def test_system_prompt_then_context(self):
+        prompt = build_prompt("$ make lens   [exit 2]")
+        assert prompt.startswith(SYSTEM_PROMPT)
+        assert "$ make lens" in prompt
+
+    def test_redaction_applies(self):
+        secret = "wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY"
+        assert secret not in build_prompt(f"$ export AWS_SECRET_ACCESS_KEY={secret}")
+
+
+class TestAskCommand:
+    def test_happy_path_stdin_to_stdout(self):
+        # `cat` echoes the prompt back: proves stdin delivery and stdout capture
+        assert ask_command("cat", "hello sai", timeout_s=10) == "hello sai"
+
+    def test_missing_binary_is_one_line_error(self):
+        with pytest.raises(AnalystError, match="command not found"):
+            ask_command("definitely-not-a-real-binary-xyz", "p", timeout_s=5)
+
+    def test_nonzero_exit_is_one_line_error(self):
+        with pytest.raises(AnalystError, match="exited 1"):
+            ask_command("false", "p", timeout_s=5)
+
+    def test_timeout_is_one_line_error(self):
+        with pytest.raises(AnalystError, match="timed out"):
+            ask_command("sleep 3", "p", timeout_s=0.3)
+
+    def test_empty_output_is_one_line_error(self):
+        with pytest.raises(AnalystError, match="no output"):
+            ask_command("true", "p", timeout_s=5)
+
+    def test_empty_command_is_one_line_error(self):
+        with pytest.raises(AnalystError, match="command is empty"):
+            ask_command("   ", "p", timeout_s=5)
 
 
 class _Handler(BaseHTTPRequestHandler):

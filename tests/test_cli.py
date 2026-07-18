@@ -75,7 +75,7 @@ class TestPullCommand:
 
     def test_endpoint_failure_is_graceful_one_liner(self, state, tmp_path, capsys):
         (tmp_path / "config.toml").write_text(
-            '[endpoint]\nurl = "http://127.0.0.1:9"\ntimeout_s = 2\n'
+            '[endpoint]\nbackend = "http"\nurl = "http://127.0.0.1:9"\ntimeout_s = 2\n'
         )
         state.mkdir(parents=True)
         (state / "pings.jsonl").write_text(json.dumps({
@@ -86,6 +86,47 @@ class TestPullCommand:
         out = capsys.readouterr().out
         assert out.startswith("sai ▸ analyst unavailable:")
         assert "Traceback" not in out
+
+    def test_command_backend_failure_is_graceful_one_liner(self, state, tmp_path, capsys):
+        (tmp_path / "config.toml").write_text(
+            '[endpoint]\nbackend = "command"\ncommand = "definitely-missing-binary-xyz"\n'
+        )
+        state.mkdir(parents=True)
+        (state / "pings.jsonl").write_text(json.dumps({
+            "t": T0, "type": "cmd", "cmd": "make", "cwd": "/x", "exit": 2,
+            "dur_s": 1.0, "pane": "%1", "tail": ["boom"], "fp": "a" * 12,
+        }) + "\n")
+        assert main(["pull"]) == 0
+        out = capsys.readouterr().out
+        assert out.startswith("sai ▸ analyst unavailable:")
+        assert "command not found" in out
+
+    def test_command_backend_happy_path_via_cat(self, state, tmp_path, capsys):
+        # `cat` as the agent CLI: the reply is the redacted prompt itself
+        (tmp_path / "config.toml").write_text(
+            '[endpoint]\nbackend = "command"\ncommand = "cat"\n'
+        )
+        state.mkdir(parents=True)
+        (state / "pings.jsonl").write_text(json.dumps({
+            "t": T0, "type": "cmd", "cmd": "make lens", "cwd": "/x", "exit": 2,
+            "dur_s": 1.0, "pane": "%1", "tail": ["Error: boom"], "fp": "a" * 12,
+        }) + "\n")
+        assert main(["pull"]) == 0
+        out = capsys.readouterr().out
+        assert "You are Sai" in out and "$ make lens" in out
+
+
+class TestStatusCommand:
+    def test_no_status_yet(self, state, capsys):
+        assert main(["status"]) == 0
+        assert "no status yet" in capsys.readouterr().out
+
+    def test_prints_status_file(self, state, capsys):
+        state.mkdir(parents=True)
+        (state / "status").write_text("⏺ make ok · just now\n▷ all quiet · C-b g anytime\n")
+        assert main(["status"]) == 0
+        out = capsys.readouterr().out
+        assert out.startswith("⏺ make ok") and "▷ all quiet" in out
 
 
 class TestInstallBlock:

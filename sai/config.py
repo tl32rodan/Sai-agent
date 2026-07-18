@@ -11,14 +11,16 @@ from pathlib import Path
 
 DEFAULT_CONFIG_TOML = """\
 [endpoint]
-url = "http://jetson.local:8080"   # OpenAI-compatible
-model = ""                         # empty: use whatever model the endpoint has loaded
-timeout_s = 30
+backend = "command"                # "command": spawn an agent CLI · "http": OpenAI-compatible POST
+command = "claude -p"              # backend = "command": reads the prompt on stdin
+url = "http://jetson.local:8080"   # backend = "http"
+model = ""                         # http only; empty: use whatever model the endpoint has loaded
+timeout_s = 60
 
 [policy]
 cooldown_min = 15
-bucket_capacity = 3
-bucket_refill_min = 20
+bucket_capacity = 10
+bucket_refill_min = 6
 ttl_min = 10
 
 [capture]
@@ -33,12 +35,14 @@ pull = "g"    # bound under tmux prefix
 
 @dataclass(frozen=True)
 class Config:
+    backend: str = "command"  # "command" | "http"
+    command: str = "claude -p"
     url: str = "http://jetson.local:8080"
-    model: str = ""  # empty: the endpoint's loaded model is used
-    timeout_s: float = 30.0
+    model: str = ""  # http only; empty: the endpoint's loaded model is used
+    timeout_s: float = 60.0
     cooldown_min: float = 15.0
-    bucket_capacity: int = 3
-    bucket_refill_min: float = 20.0
+    bucket_capacity: int = 10
+    bucket_refill_min: float = 6.0
     ttl_min: float = 10.0
     tail_lines: int = 40
     tail_bytes: int = 8192
@@ -54,6 +58,8 @@ def parse_config(toml_text: str) -> Config:
     keys = data.get("keys", {})
     d = Config()
     return Config(
+        backend=str(endpoint.get("backend", d.backend)),
+        command=str(endpoint.get("command", d.command)),
         url=str(endpoint.get("url", d.url)),
         model=str(endpoint.get("model", d.model)),
         timeout_s=float(endpoint.get("timeout_s", d.timeout_s)),

@@ -126,7 +126,7 @@ No LLM anywhere in the push path.
 
 * **Boundary-only:** decisions are evaluated only on completed command events (structurally guaranteed by the sensor — never fires mid-command).
 * **Cooldown:** same fingerprint silenced for 15 min after a push.
-* **Rate limit:** token bucket, capacity 3, refill 1 token / 20 min. Applies to pushes only; pulls are unlimited.
+* **Rate limit:** token bucket, capacity 3, refill 1 token / 20 min. Applies to pushes only; pulls are unlimited. *(Amended 2026-07-18, §16.1: capacity 10, refill 1 / 6 min — start louder, tune down from dogfood data.)*
 * **TTL:** a candidate older than 10 min is dropped, never pushed. A stale hint is worse than silence.
 * **Blind:** events inside blind spans never become candidates (enforced upstream, asserted here too).
 
@@ -146,7 +146,7 @@ No LLM text in pushes. The push only says *that* something is worth a look; the 
 
 1. Gather the last 5 completed commands with tails + cwd + fingerprint repeat counts.
 2. Apply redaction (§10.1).
-3. POST to `{endpoint}/v1/chat/completions` with `SAI_MODEL`, the system prompt from Appendix A, 30 s timeout.
+3. POST to `{endpoint}/v1/chat/completions` with `SAI_MODEL`, the system prompt from Appendix A, 30 s timeout. *(Amended 2026-07-18, §16.3: the analyst backend is pluggable — default is now spawning an agent CLI, `claude -p`; the http endpoint remains a config switch. Timeout configurable, default 60 s.)*
 4. Render reply in `tmux display-popup` (requires tmux ≥ 3.2; `sai init` must verify the version and fail loudly with instructions if older). On endpoint failure, show a graceful one-line error — never a stack trace in the popup.
 
 ### 10.1 Redaction (pure, applied to every byte leaving the machine)
@@ -220,11 +220,43 @@ sai/
 
 ### 15.1 Questions added during implementation (agent → owner; defaults chosen, all reversible in code review)
 
-5. **Invariant 2 vs token-bucket burst math.** A bucket with capacity 3 that starts full and refills 1 token / 20 min permits up to 6 pushes in the *first* rolling hour (3 burst + 3 refilled), which would violate invariant 2 as written ("pushes in any rolling hour ≤ token-bucket capacity"). Per §2 (conservative defaults; when in doubt, stay silent), the implementation enforces **both** the token bucket **and** a hard rolling-one-hour cap equal to the bucket capacity. The stricter of the two wins; invariant 2 holds exactly as written. If the burst-friendlier pure-bucket behavior was intended, delete the rolling-window check in `policy.py` and relax the invariant-2 test.
+5. **Invariant 2 vs token-bucket burst math.** A bucket with capacity 3 that starts full and refills 1 token / 20 min permits up to 6 pushes in the *first* rolling hour (3 burst + 3 refilled), which would violate invariant 2 as written ("pushes in any rolling hour ≤ token-bucket capacity"). Per §2 (conservative defaults; when in doubt, stay silent), the implementation enforces **both** the token bucket **and** a hard rolling-one-hour cap equal to the bucket capacity. The stricter of the two wins; invariant 2 holds exactly as written. *(Resolved 2026-07-18: owner keeps the dual mechanism and re-tuned the budget to 10/hour — capacity 10, refill 1/6 min, at which point bucket and rolling cap agree in steady state. See §16.1.)*
 6. **R2 on a successful command.** Should a *successful* command completion fire the struggle-loop rule because two earlier commands in the window failed? Chosen default: no — the current event must itself be a failure for R2 (a struggle that just ended in success needs no ping). Table-tested in `tests/test_salience.py`.
 7. **"First error-looking line" (§7).** Defined as: first tail line matching the §8 error patterns or `error|fatal|fail` (case-insensitive); falling back to the last non-empty tail line, else the empty string. Golden-tested.
 8. **Long-run redaction false positives.** The ">32 char base64/hex run" rule redacts some long paths and identifiers too. Accepted: conservative beats leaky (§2 privacy). Revisit only if pull-path answers degrade in practice.
 9. **License mismatch.** *(Resolved 2026-07-18: owner chose MIT; the Apache-2.0 `LICENSE` file was replaced.)*
+
+## 16. Amendments (2026-07-18, owner-directed)
+
+The original text above is left intact; where it conflicts with this section, this section wins.
+
+### 16.1 Politeness budget re-tuned
+
+Cooldown unchanged (15 min per fingerprint). Rate limit raised to **10 pushes per rolling hour** (bucket capacity 10, refill 1 token / 6 min; the rolling-hour hard cap of §15.1 Q5 stays and now agrees with the bucket in steady state). Rationale: start louder and let the M0.c diary say whether to turn it down — the budget is a fuse, not the definition of proactivity. The *definition* lives in salience's vocabulary of moments (see §16.4).
+
+### 16.2 Ambient status surface (in scope for M0, new)
+
+A glanceable two-line surface — the double inverted pyramid: conclusion first, offer second, deep analysis lazy behind the pull.
+
+* The daemon renders two lines from recent events (pure rules, zero LLM — same blood as push templates): line 1 = *what the user is doing* (`⏺ make lens — exit 2 ×3 same error · 2m ago`), line 2 = *what Sai could do* (`▷ C-b g — this error repeated ×3: root cause?`).
+* Written to `~/.local/state/sai/status` whenever the content changes; `sai status` prints it. Users mount it in a tmux status-line segment or a 2-line pane (`watch -t -n 5 sai status`).
+* This surface is **not** subject to the §9 policy: it never interrupts — it exists only when looked at, so its attention cost is zero. Blind zones are shown honestly ("blind zone — sai neither sees nor speaks here").
+* `status.py` joins the pure core (purity + line-length tested).
+
+### 16.3 Pull backend: agent CLI by default
+
+The analyst backend is pluggable via `[endpoint] backend`:
+
+* `"command"` (new default): spawn an agent CLI with the redacted prompt on stdin — default `claude -p`, run in the user's most recent cwd so the agent can *read* the project it is diagnosing. Rationale: reuse an already-tuned agent harness instead of rebuilding one around a raw API; Sai is a layer *above* cc/oc, not a replacement for them.
+* `"http"`: the original OpenAI-compatible POST (llama.cpp on Jetson) — fully local, kept as a first-class switch.
+
+§2's privacy wall is amended, not removed: **redaction applies to every byte leaving Sai regardless of backend** (invariant 5 covers both); local inference remains one config line away. What changed is that "local by default" became "owner's choice, redacted always."
+
+### 16.4 M1 direction (recorded, not scheduled)
+
+* **Vocabulary of moments.** Salience grows beyond failure-moments: *completion* (a long task just finished), *idle* (a burst of activity went quiet), *resolution* (a struggle loop just ended in success — invite consolidation, don't warn). These supersede the corresponding §4.2 non-goals (digest, UserState) **only when M1 starts**; M0.c runs with failure-moments only.
+* **The actuation ladder.** The contract is refined from "observe-only" to **mutation-free initiative**: Sai may look (sensors), speak (push/status), consult (read-only analysis), and *propose* — including proactively running an agent's plan mode (cc/oc/codex all have one) and parking the resulting plan behind the status surface / pull, lazily. What Sai may never do autonomously is the last rung: **execute**. Every plan is handed to an agentic runtime only by an explicit human act. The Go metaphor holds: Sai may now think as deeply as it likes before speaking — but Hikaru still places every stone.
+* Bridging risks to design against in M1: prompt-injection from observed terminal output reaching a tool-bearing agent (lock the consulted agent to read-only tools, no network tools), a compute/cost budget for proactive plan runs (a second token bucket), and the trust asymmetry — an unwanted *plan* is a bigger interruption than an unwanted one-liner, so proposals surface lazily, never as pushes.
 
 ## Appendix A — Analyst system prompt (pull path)
 
@@ -234,14 +266,16 @@ sai/
 
 ```toml
 [endpoint]
-url = "http://jetson.local:8080"   # OpenAI-compatible
-model = ""                         # empty: use whatever model the endpoint has loaded
-timeout_s = 30
+backend = "command"                # "command": spawn an agent CLI · "http": OpenAI-compatible POST
+command = "claude -p"              # backend = "command": reads the prompt on stdin
+url = "http://jetson.local:8080"   # backend = "http"
+model = ""                         # http only; empty: use whatever model the endpoint has loaded
+timeout_s = 60
 
 [policy]
 cooldown_min = 15
-bucket_capacity = 3
-bucket_refill_min = 20
+bucket_capacity = 10
+bucket_refill_min = 6
 ttl_min = 10
 
 [capture]

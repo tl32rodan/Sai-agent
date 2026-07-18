@@ -12,7 +12,9 @@ import time
 from pathlib import Path
 
 from . import __version__
-from .analyst import AnalystError, ask, build_payload, gather_context
+from .analyst import (
+    AnalystError, ask, ask_command, build_payload, build_prompt, gather_context,
+)
 from .config import DEFAULT_CONFIG_TOML, config_path, load_config, state_dir
 from .daemon import Daemon
 from .stats import compute_stats, render_stats
@@ -171,19 +173,42 @@ def cmd_daemon(_args: argparse.Namespace) -> int:
 def cmd_pull(_args: argparse.Namespace) -> int:
     config = load_config()
     now = time.time()
-    context = gather_context(_read_pings(limit=2000))
+    records = _read_pings(limit=2000)
+    context = gather_context(records)
     _append_ping({"t": now, "type": "pull"})
     if not context:
         print("sai ▸ nothing observed yet — run a few commands first")
         return 0
-    model = os.environ.get("SAI_MODEL", config.model)
-    payload = build_payload(context, model=model)
     try:
-        reply = ask(config.url, payload, timeout_s=config.timeout_s)
+        if config.backend == "command":
+            # run in the user's latest cwd so the agent can read the project
+            cwd = next(
+                (r["cwd"] for r in reversed(records)
+                 if r.get("type") == "cmd" and r.get("cwd")), None)
+            if cwd is not None and not os.path.isdir(cwd):
+                cwd = None
+            reply = ask_command(config.command, build_prompt(context),
+                                timeout_s=config.timeout_s, cwd=cwd)
+        elif config.backend == "http":
+            model = os.environ.get("SAI_MODEL", config.model)
+            reply = ask(config.url, build_payload(context, model=model),
+                        timeout_s=config.timeout_s)
+        else:
+            raise AnalystError(
+                f"unknown backend {config.backend!r} — use \"command\" or \"http\"")
     except AnalystError as e:
         print(f"sai ▸ analyst unavailable: {e}")
         return 0  # graceful one-liner; never a stack trace in the popup (§10)
     print(reply)
+    return 0
+
+
+def cmd_status(_args: argparse.Namespace) -> int:
+    path = state_dir() / "status"
+    if path.exists():
+        print(path.read_text(), end="")
+    else:
+        print("sai ▸ no status yet — is `sai daemon` running?")
     return 0
 
 
@@ -214,6 +239,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("init", help="install hooks + config, verify tmux/zsh").set_defaults(fn=cmd_init)
     sub.add_parser("daemon", help="run the observer daemon").set_defaults(fn=cmd_daemon)
     sub.add_parser("pull", help="ask the analyst about recent activity").set_defaults(fn=cmd_pull)
+    sub.add_parser("status", help="two-line ambient status (for panes/status bars)").set_defaults(fn=cmd_status)
     p_stats = sub.add_parser("stats", help="pings, pulls, coverage, top fingerprints")
     p_stats.add_argument("--days", type=int, default=None)
     p_stats.set_defaults(fn=cmd_stats)

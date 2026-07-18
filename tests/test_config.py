@@ -24,7 +24,7 @@ class TestParseConfig:
         assert config.model == "llama3"
         assert config.cooldown_min == 5.0
         assert config.pull_key == "y"
-        assert config.bucket_capacity == 3  # untouched sections keep defaults
+        assert config.bucket_capacity == 10  # untouched sections keep defaults
 
 
 class TestPaths:

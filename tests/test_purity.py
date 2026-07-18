@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-PURE_MODULES = ["events.py", "fingerprint.py", "salience.py", "policy.py", "redact.py"]
+PURE_MODULES = [
+    "events.py", "fingerprint.py", "salience.py", "policy.py", "redact.py",
+    "status.py",
+]
 
 FORBIDDEN_TOKENS = [
     "time.time", "import time", "datetime",           # no clock

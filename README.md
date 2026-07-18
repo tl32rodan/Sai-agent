@@ -23,8 +23,9 @@ PTY shim / raw byte interposition · OSC 133 segmenter · UserState machine (FLO
 * zsh
 * tmux ≥ 3.2 (for `display-popup`)
 * Python ≥ 3.11 (runtime is stdlib-only; `pytest` + `hypothesis` are dev-only)
-* an OpenAI-compatible LLM endpoint for the pull path (e.g. llama.cpp `--api` on a Jetson);
-  the push path uses no LLM at all
+* for the pull path: an agent CLI (default: `claude -p`) **or** an OpenAI-compatible
+  endpoint (e.g. llama.cpp `--api` on a Jetson) — switch via `backend` in the config;
+  the push path and the status surface use no LLM at all
 
 ## Install
 
@@ -48,15 +49,35 @@ sai daemon &          # or run it in a dedicated window: tmux new-window -d 'sai
 ## Use
 
 You don't "open" Sai. Work normally. When something looks worth a look — a failure, a
-struggle loop, a known error pattern — Sai says one line, at a command boundary, at most
-a few times an hour:
+struggle loop, a known error pattern — Sai says one line, at a command boundary, within
+a bounded budget (default 10/hour, 15 min per-error cooldown):
 
 ```
 sai ▸ exit 2 ×3 — same error repeating · C-b g for why
 ```
 
-* **`prefix + g`** — pull: sends the last few commands + redacted output to your local
-  LLM endpoint and shows the analysis in a popup. Pulls are unlimited.
+And at any moment, a glance at the **status surface** tells you what Sai sees and what
+it could do — conclusion first, offer second, deep analysis lazy behind the pull:
+
+```
+⏺ make lens — exit 2 ×3 same error · 2m ago
+▷ C-b g — this error repeated ×3: root cause?
+```
+
+Mount it wherever you like:
+
+```sh
+# a 2-line dedicated pane…
+tmux split-window -l 2 "watch -t -n 5 sai status"
+# …or a tmux status-line segment
+set -g status-interval 5
+set -g status-right "#(head -1 ~/.local/state/sai/status)"
+```
+
+* **`prefix + g`** — pull: sends the last few commands + redacted output to the analyst
+  backend and shows the analysis in a popup. Default backend spawns `claude -p` in your
+  latest cwd (so it can *read* the project); set `backend = "http"` for a fully local
+  OpenAI-compatible endpoint instead. Pulls are unlimited.
 * **`sai stats`** — pings, drops, pulls, pull-after-push rate, blind-zone coverage %,
   top error fingerprints.
 * **`sai log`** — tail the audit log (`~/.local/state/sai/pings.jsonl`); every push
@@ -67,8 +88,9 @@ sai ▸ exit 2 ×3 — same error repeating · C-b g for why
 
 Privacy is a load-bearing wall, not a feature:
 
-* **Local inference by default** — the only network call is the pull path, to the endpoint
-  *you* configure.
+* **Redaction always, backend by choice** — the only data that ever leaves Sai is the
+  pull path, through the backend *you* configure; fully local inference (`backend =
+  "http"` + llama.cpp) is one config line away.
 * **Output-only capture** — zsh hooks record completed commands; `pipe-pane -O` records
   pane *output*. No keystrokes.
 * **Redaction before any byte leaves the machine** — `KEY=`/`TOKEN=`/`SECRET=`/`PASSWORD=`/

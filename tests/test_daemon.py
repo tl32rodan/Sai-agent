@@ -190,6 +190,21 @@ class TestDaemonIOSmoke:
         (cmd_record,) = [r for r in records if r["type"] == "cmd"]
         assert cmd_record["tail"] == ["error: 佐為 not found"]
 
+    def test_status_file_written_and_updated(self, tmp_path):
+        clock = FakeClock()
+        daemon = Daemon(tmp_path, Config(), clock=clock, push=lambda p, t: None)
+        daemon.step()
+        status = (tmp_path / "status").read_text()
+        assert "watching" in status  # nothing observed yet
+        (tmp_path / "out-%1.log").write_bytes(b"make: *** [lens] Error 2\n")
+        (tmp_path / "events.tsv").write_text(
+            make_tsv(t=clock.t, cmd="make lens", exit=2, pane="%1") + "\n")
+        daemon.step()
+        status = (tmp_path / "status").read_text()
+        line1, line2, _ = status.split("\n")
+        assert "make" in line1 and "exit 2" in line1
+        assert "C-b g" in line2
+
     def test_truncated_file_resets_offset(self, tmp_path):
         clock = FakeClock()
         pushes: list[tuple[str, str]] = []

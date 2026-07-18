@@ -13,6 +13,8 @@ import time
 from pathlib import Path
 from typing import Callable
 
+from collections import deque
+
 from .config import Config
 from .events import (
     BlindEvent, CmdEvent, PaneTracker, blind_to_json, cmd_to_json,
@@ -21,6 +23,7 @@ from .events import (
 from .fingerprint import fingerprint
 from .policy import Policy, Push, Verdict
 from .salience import STRUGGLE_WINDOW, evaluate
+from .status import render_status
 
 POLL_S = 0.2
 
@@ -54,6 +57,8 @@ class DaemonCore:
         self._log = log
         self._trackers: dict[str, PaneTracker] = {}
         self._history: dict[str, list[CmdEvent]] = {}
+        self._recent: deque[CmdEvent] = deque(maxlen=10)  # cross-pane, for status
+        self._last_pane = ""
         self._policy = Policy(
             clock=clock,
             cooldown_s=config.cooldown_min * 60,
@@ -65,6 +70,7 @@ class DaemonCore:
 
     def on_pane_output(self, pane: str, data: str) -> None:
         now = self._clock()
+        self._last_pane = pane
         tracker = self._trackers.setdefault(pane, PaneTracker(self._config.ring_lines))
         for state in tracker.feed(now, data):
             self._log(blind_to_json(BlindEvent(now, pane, state)))
@@ -74,6 +80,7 @@ class DaemonCore:
         if event is None:
             return
         now = self._clock()
+        self._last_pane = event.pane
         tracker = self._trackers.get(event.pane)
         if tracker is not None:
             event = with_tail(event, tracker.ring.snapshot(
@@ -104,6 +111,17 @@ class DaemonCore:
         history = self._history.setdefault(event.pane, [])
         history.append(event)
         del history[:-STRUGGLE_WINDOW]
+        self._recent.append(event)
+
+    def status_text(self) -> str:
+        """Two-line ambient status (§16.2) — glanceable, zero LLM."""
+        tracker = self._trackers.get(self._last_pane)
+        return render_status(
+            tuple(self._recent),
+            now=self._clock(),
+            blind=tracker.blind if tracker else False,
+            pull_key=self._config.pull_key,
+        )
 
 
 class _Tail:
@@ -175,6 +193,8 @@ class Daemon:
             for path in state_dir.glob("out-*.log")
         }
         self._decoders: dict[str, codecs.IncrementalDecoder] = {}
+        self._status_path = state_dir / "status"
+        self._last_status: str | None = None
 
     def _append_log(self, record: dict) -> None:
         with self._pings.open("a", encoding="utf-8") as f:
@@ -203,6 +223,10 @@ class Daemon:
             for raw in complete:
                 if raw:
                     self.core.on_tsv_line(raw.decode("utf-8", "replace"))
+        status = self.core.status_text()
+        if status != self._last_status:  # rewrites on events + minute ticks only
+            self._status_path.write_text(status + "\n")
+            self._last_status = status
 
     def run(self) -> None:
         while True:

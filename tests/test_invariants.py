@@ -6,7 +6,7 @@ import json
 
 from hypothesis import given, settings, strategies as st
 
-from sai.analyst import build_payload
+from sai.analyst import build_payload, build_prompt
 from sai.config import Config
 from sai.daemon import DaemonCore
 from sai.fingerprint import fingerprint
@@ -118,9 +118,13 @@ def test_invariant_5_no_secret_survives_into_analyst_payload(secret, long_secret
         "    -----END OPENSSH PRIVATE KEY-----",
         f"    session blob {long_secret}",
     ])
-    wire_bytes = json.dumps(build_payload(context, model="qwen2.5-coder"))
+    wire_bytes = json.dumps(build_payload(context, model="some-model"))
     assert secret not in wire_bytes
     assert long_secret not in wire_bytes
+    # …and the command-backend prompt honors the same boundary (§16.3):
+    prompt = build_prompt(context)
+    assert secret not in prompt
+    assert long_secret not in prompt
 
 
 def test_invariant_6_every_push_is_in_the_audit_log():
