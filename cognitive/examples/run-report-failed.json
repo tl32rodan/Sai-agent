@@ -1,0 +1,21 @@
+{
+  "schema": "rr-v1",
+  "group_id": "char-lvf-2026-07-19-041",
+  "status": "PARTIAL",
+  "leaves": [
+    [{"library": "tsmc_ff_0p88v", "pvt": "ff_0p88v_125c", "cell": "INVD1"}, "b41c9f2a"],
+    [{"library": "tsmc_ff_0p88v", "pvt": "ff_0p88v_125c", "cell": "NAND2D1"}, "77aa01ce"]
+  ],
+  "failed": [
+    [[{"library": "tsmc_ff_0p88v", "pvt": "ff_0p88v_125c", "cell": "DFCNQD1"}, "e0d3b551"], 2],
+    [[{"library": "tsmc_ff_0p88v", "pvt": "ff_0p88v_125c", "cell": "DFCNQD2"}, "a19c44f0"], 2],
+    [[{"library": "tsmc_ff_0p88v", "pvt": "ff_0p88v_125c", "cell": "DFCNQD4"}, "5be2d7c3"], 2]
+  ],
+  "started_s": 1784390000.0,
+  "finished_s": 1784391842.5,
+  "log_path": "/nfs/proj/char/logs/char-lvf-2026-07-19-041.log",
+  "meta": {
+    "stderr_tail": "ERROR: characterization failed for DFCNQD*: missing .lib template (lvf branch)",
+    "tool_version": "liberate 22.1.2"
+  }
+}

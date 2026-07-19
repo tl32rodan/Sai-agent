@@ -1,0 +1,32 @@
+#!/usr/bin/env python3
+"""sai-observe — feed ANY observation text to the cognitive judge, no daemon,
+no zsh, no tmux needed. This is the batch-flow bridge: pipe in a dage
+run-report, a log excerpt, a control_view dump — anything — and get a
+memory-driven assessment (journaled, same as the daemon path).
+
+    cat inbox/run-report-*.json | sai-observe "dage run-reports, char stage"
+    tail -100 build.log         | sai-observe "LVF characterization log"
+
+Works from tcsh/batch scripts (it is exec'd, not sourced). Stdlib-only,
+Python >= 3.6. Same env knobs as sai-cognitive (SAI_COG_MEM, SAI_COG_BACKEND).
+"""
+import os
+import subprocess
+import sys
+
+here = os.path.dirname(os.path.abspath(__file__))
+title = " ".join(sys.argv[1:]) or "ad-hoc observation"
+text = sys.stdin.read()
+if not text.strip():
+    sys.stderr.write("sai-observe: empty observation on stdin\n")
+    sys.exit(2)
+
+prompt = (
+    "Here is an observation from a production flow (%s):\n\n%s\n\n"
+    "What stands out, is anything worth escalating, and what should be "
+    "checked next?" % (title, text)
+)
+proc = subprocess.run(
+    [sys.executable, os.path.join(here, "sai-cognitive")], input=prompt, text=True,
+)
+sys.exit(proc.returncode)

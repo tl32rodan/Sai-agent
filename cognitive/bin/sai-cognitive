@@ -1,0 +1,96 @@
+#!/usr/bin/env python3
+"""sai-cognitive — P0 cognitive backend for Sai (docs/cognitive-architecture.md).
+
+Sai's command backend spawns this with the redacted context on stdin and reads
+the assessment from stdout:
+
+    stdin prompt -> [personality memory prepended] -> inner LLM CLI -> stdout
+                                   +-> outcome appended to journal/ (iteration)
+
+Domain knowledge lives ONLY in the memory dir (All-Might memory shape:
+understanding/*.md + journal/) — Sai core is untouched, so swapping the memory
+dir retargets the same judge to another domain.
+
+Also usable standalone (no Sai daemon): pipe any prompt in. Stdlib-only,
+Python >= 3.6 (works on RHEL8 system python3).
+
+Env overrides:
+  SAI_COG_MEM      memory dir   (default ~/.config/sai/flow_doctor)
+  SAI_COG_BACKEND  inner CLI    (default "claude -p"; e.g. an opencode
+                                 headless invocation on internal hosts)
+"""
+import json
+import os
+import shlex
+import subprocess
+import sys
+import time
+
+MEM = os.environ.get(
+    "SAI_COG_MEM", os.path.join(os.path.expanduser("~"), ".config", "sai", "flow_doctor")
+)
+BACKEND = os.environ.get("SAI_COG_BACKEND", "claude -p")
+
+HEADER = (
+    "You are the cognitive plane of Sai, an observe-only flow advisor. Below is\n"
+    "your accumulated memory for this domain, then a fresh observation. Judge\n"
+    "salience USING THE MEMORY: explicitly suppress anything memory marks as\n"
+    "known noise (say so in one line), escalate what memory does not explain,\n"
+    "and respect recorded owner preferences. Label conclusions as preliminary.\n"
+)
+
+
+def understanding_files():
+    d = os.path.join(MEM, "understanding")
+    if not os.path.isdir(d):
+        return []
+    return sorted(
+        os.path.join(d, f) for f in os.listdir(d) if f.endswith(".md")
+    )
+
+
+def load_memory():
+    parts = []
+    for path in understanding_files():
+        with open(path, encoding="utf-8") as f:
+            parts.append("--- memory: %s ---\n%s" % (os.path.basename(path), f.read()))
+    if not parts:
+        return "(memory is empty — cold start; judge with generic rules only)"
+    return "\n".join(parts)
+
+
+def journal(record):
+    day = time.strftime("%Y-%m-%d")
+    jdir = os.path.join(MEM, "journal")
+    os.makedirs(jdir, exist_ok=True)
+    with open(os.path.join(jdir, day + ".jsonl"), "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def main():
+    prompt = sys.stdin.read()
+    memory = load_memory()
+    full = "%s\n===== MEMORY =====\n%s\n===== OBSERVATION =====\n%s" % (
+        HEADER, memory, prompt
+    )
+    proc = subprocess.run(
+        shlex.split(BACKEND), input=full, capture_output=True, text=True, timeout=300,
+    )
+    if proc.returncode != 0:
+        sys.stderr.write(proc.stderr or "inner backend failed\n")
+        return proc.returncode
+    answer = proc.stdout.strip()
+    lines = prompt.strip().splitlines()
+    journal({
+        "t": time.time(),
+        "type": "assessment",
+        "memory_files": [os.path.basename(p) for p in understanding_files()],
+        "observation_head": lines[-1][:120] if lines else "",
+        "assessment_head": answer.splitlines()[0][:200] if answer else "",
+    })
+    print(answer)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

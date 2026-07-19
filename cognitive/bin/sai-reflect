@@ -1,0 +1,103 @@
+#!/usr/bin/env python3
+"""sai-reflect — P1 consolidation: turn accumulated journal outcomes + raw
+feedback bullets into a revised, concise learned-feedback.md.
+
+Default is a DRY RUN (prints the proposed consolidation); --apply rewrites
+understanding/learned-feedback.md with it (previous version saved as
+learned-feedback.md.bak). The LLM proposes; writing memory is a deliberate,
+human-triggered act — never automatic.
+
+    sai-reflect            # show proposal
+    sai-reflect --apply    # accept it into memory
+
+Stdlib-only, Python >= 3.6. Env: SAI_COG_MEM, SAI_COG_BACKEND (same as
+sai-cognitive).
+"""
+import json
+import os
+import shlex
+import shutil
+import subprocess
+import sys
+
+MEM = os.environ.get(
+    "SAI_COG_MEM", os.path.join(os.path.expanduser("~"), ".config", "sai", "flow_doctor")
+)
+BACKEND = os.environ.get("SAI_COG_BACKEND", "claude -p")
+KEEP_DAYS = 14
+
+PROMPT = (
+    "You maintain the learned memory of an observe-only flow advisor. Below are\n"
+    "(1) the current learned-feedback notes and (2) recent journal records\n"
+    "(assessments + owner feedback). Rewrite the learned-feedback notes as a\n"
+    "concise, deduplicated markdown document: keep only durable lessons (known\n"
+    "noise with thresholds, confirmed signals, owner preferences), merge\n"
+    "repeats, drop one-offs that later feedback contradicted. Output ONLY the\n"
+    "new markdown document, starting with the line\n"
+    "'# Learned from owner feedback (consolidated)'.\n"
+)
+
+
+def read(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+def recent_journal():
+    jdir = os.path.join(MEM, "journal")
+    if not os.path.isdir(jdir):
+        return ""
+    days = sorted(f for f in os.listdir(jdir) if f.endswith(".jsonl"))[-KEEP_DAYS:]
+    lines = []
+    for day in days:
+        for line in read(os.path.join(jdir, day)).splitlines():
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue
+            if rec.get("type") == "feedback":
+                lines.append("[feedback %s] %s — on: %s"
+                             % (rec.get("verdict"), rec.get("note", ""),
+                                rec.get("ref_assessment", "")[:100]))
+            elif rec.get("type") == "assessment":
+                lines.append("[assessment] %s" % rec.get("assessment_head", "")[:120])
+    return "\n".join(lines[-200:])
+
+
+def main():
+    apply = "--apply" in sys.argv[1:]
+    current = read(os.path.join(MEM, "understanding", "learned-feedback.md"))
+    journal = recent_journal()
+    if not current and not journal:
+        sys.stderr.write("sai-reflect: nothing to consolidate (no journal, no notes)\n")
+        return 1
+    full = ("%s\n===== CURRENT NOTES =====\n%s\n===== RECENT JOURNAL =====\n%s"
+            % (PROMPT, current or "(none)", journal or "(none)"))
+    proc = subprocess.run(
+        shlex.split(BACKEND), input=full, capture_output=True, text=True, timeout=300,
+    )
+    if proc.returncode != 0:
+        sys.stderr.write(proc.stderr or "inner backend failed\n")
+        return proc.returncode
+    proposal = proc.stdout.strip()
+    if not apply:
+        print(proposal)
+        print("\n--- dry run; rerun with --apply to write this into memory ---",
+              file=sys.stderr)
+        return 0
+    udir = os.path.join(MEM, "understanding")
+    os.makedirs(udir, exist_ok=True)
+    path = os.path.join(udir, "learned-feedback.md")
+    if os.path.exists(path):
+        shutil.copy(path, path + ".bak")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(proposal + "\n")
+    print("consolidated -> %s (previous saved as .bak)" % path)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

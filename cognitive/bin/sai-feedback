@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+"""sai-feedback — P1: close the loop. Record whether the LAST assessment was
+signal or noise; the verdict lands in BOTH the journal (audit) and
+understanding/learned-feedback.md (memory the next judgment actually reads).
+
+    sai-feedback signal "root cause confirmed: missing .lib template"
+    sai-feedback noise  "lvf license timeouts are a known Tuesday thing"
+
+Stdlib-only, Python >= 3.6. Env: SAI_COG_MEM (default ~/.config/sai/flow_doctor).
+"""
+import json
+import os
+import sys
+import time
+
+MEM = os.environ.get(
+    "SAI_COG_MEM", os.path.join(os.path.expanduser("~"), ".config", "sai", "flow_doctor")
+)
+
+
+def last_assessment():
+    jdir = os.path.join(MEM, "journal")
+    if not os.path.isdir(jdir):
+        return None
+    days = sorted(f for f in os.listdir(jdir) if f.endswith(".jsonl"))
+    for day in reversed(days):
+        last = None
+        with open(os.path.join(jdir, day), encoding="utf-8") as f:
+            for line in f:
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if rec.get("type") == "assessment":
+                    last = rec
+        if last:
+            return last
+    return None
+
+
+def main():
+    if len(sys.argv) < 2 or sys.argv[1] not in ("signal", "noise"):
+        sys.stderr.write("usage: sai-feedback signal|noise [note]\n")
+        return 2
+    verdict = sys.argv[1]
+    note = " ".join(sys.argv[2:])
+    ref = last_assessment()
+
+    day = time.strftime("%Y-%m-%d")
+    jdir = os.path.join(MEM, "journal")
+    os.makedirs(jdir, exist_ok=True)
+    with open(os.path.join(jdir, day + ".jsonl"), "a", encoding="utf-8") as f:
+        f.write(json.dumps({
+            "t": time.time(), "type": "feedback", "verdict": verdict, "note": note,
+            "ref_t": ref.get("t") if ref else None,
+            "ref_assessment": ref.get("assessment_head", "") if ref else "",
+        }, ensure_ascii=False) + "\n")
+
+    udir = os.path.join(MEM, "understanding")
+    os.makedirs(udir, exist_ok=True)
+    path = os.path.join(udir, "learned-feedback.md")
+    fresh = not os.path.exists(path)
+    with open(path, "a", encoding="utf-8") as f:
+        if fresh:
+            f.write("# Learned from owner feedback\n\n"
+                    "(appended by sai-feedback; consolidate with sai-reflect)\n\n")
+        head = (ref.get("assessment_head", "")[:100] if ref else "(no prior assessment)")
+        f.write("- **%s** (%s) on \"%s\"%s\n"
+                % (verdict.upper(), day, head, (" — " + note) if note else ""))
+
+    target = "assessment @%s" % time.strftime(
+        "%H:%M:%S", time.localtime(ref["t"])) if ref else "no prior assessment found"
+    print("feedback recorded: %s (%s) -> journal + understanding/learned-feedback.md"
+          % (verdict, target))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
